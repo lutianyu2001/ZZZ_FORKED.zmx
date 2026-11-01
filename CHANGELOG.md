@@ -12,6 +12,7 @@ Use spec: https://common-changelog.org/
 ### Added
 
 - zmx as a zig package
+- `zmx attach --min-window` sizes a session's PTY to the smallest cols and rows among attached clients
 - Completions for [`yash`](https://magicant.github.io/yash/)
 - History command now accepts --screen (print only active screen) and --scrollback (num of rows to print)
 - Attaching now reports the session name and foreground process to the terminal as `zmx_session` and `zmx_foreground` user variables
