@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const build_options = @import("build_options");
 const has_daemon = if (@hasDecl(build_options, "has_daemon")) build_options.has_daemon else true;
 pub const terminal = if (has_daemon) @import("terminal.zig") else struct {};
@@ -305,6 +306,51 @@ fn matchSeq(data: []const u8, seq: []const u8) bool {
     return std.mem.eql(u8, data[0..seq.len], seq);
 }
 
+/// Emit a user variable (OSC 1337;SetUserVar), the format iTerm2 and WezTerm
+/// define for a program to hand named values to its terminal. Terminals that
+/// don't know it ignore the sequence.
+fn writeUserVar(writer: *std.Io.Writer, name: []const u8, value: []const u8) !void {
+    try writer.print("\x1b]1337;SetUserVar={s}=", .{name});
+    try std.base64.standard.Encoder.encodeWriter(writer, value);
+    try writer.writeAll("\x07");
+}
+
+/// Tell the terminal which session it is now showing and what is running in
+/// it. A snapshot restores what the screen looks like, but nothing in it says
+/// that the program behind it is, say, a shell or an editor.
+pub fn writeSessionInfo(
+    writer: *std.Io.Writer,
+    session_name: []const u8,
+    foreground: ?[]const u8,
+) !void {
+    try writeUserVar(writer, "zmx_session", session_name);
+    if (foreground) |name| try writeUserVar(writer, "zmx_foreground", name);
+}
+
+extern "c" fn proc_name(pid: c_int, buffer: [*]u8, buffersize: u32) c_int;
+
+/// The kernel's short name for a process: its executable name, truncated to 15
+/// bytes on Linux. Arguments are left out on purpose, since they can hold
+/// secrets and this name is sent to the terminal.
+pub fn processName(buf: []u8, pid: i32) ?[]const u8 {
+    switch (builtin.os.tag) {
+        .linux => {
+            var path_buf: [32]u8 = undefined;
+            const path = std.fmt.bufPrint(&path_buf, "/proc/{d}/comm", .{pid}) catch return null;
+            const fd = lib_posix.open(path, .{ .ACCMODE = .RDONLY }, 0) catch return null;
+            defer lib_posix.close(fd);
+            const n = lib_posix.read(fd, buf) catch return null;
+            const name = std.mem.trimEnd(u8, buf[0..n], "\n");
+            return if (name.len > 0) name else null;
+        },
+        .macos => {
+            const n = proc_name(pid, buf.ptr, @intCast(buf.len));
+            return if (n > 0) buf[0..@intCast(n)] else null;
+        },
+        else => return null,
+    }
+}
+
 /// OSC 133;A (prompt start) marker.
 const OSC_133_A = "\x1b]133;A";
 
@@ -379,6 +425,33 @@ pub fn rewritePromptRedraw(alloc: std.mem.Allocator, data: []const u8) ?[]const 
     }
 
     return result.toOwnedSlice(alloc) catch null;
+}
+
+test "writeSessionInfo: session and foreground as base64 user variables" {
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    try writeSessionInfo(&output.writer, "dev", "claude");
+    try testing.expectEqualStrings(
+        "\x1b]1337;SetUserVar=zmx_session=ZGV2\x07" ++
+            "\x1b]1337;SetUserVar=zmx_foreground=Y2xhdWRl\x07",
+        output.written(),
+    );
+}
+
+test "writeSessionInfo: unknown foreground leaves the variable out" {
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    try writeSessionInfo(&output.writer, "dev", null);
+    try testing.expectEqualStrings("\x1b]1337;SetUserVar=zmx_session=ZGV2\x07", output.written());
+}
+
+test "processName: finds the running process and rejects a dead pid" {
+    if (builtin.os.tag != .linux and builtin.os.tag != .macos) return error.SkipZigTest;
+    var buf: [256]u8 = undefined;
+    const name = processName(&buf, std.c.getpid()) orelse return error.TestUnexpectedResult;
+    try testing.expect(name.len > 0);
+    try testing.expect(std.mem.indexOfScalar(u8, name, '\n') == null);
+    try testing.expectEqual(null, processName(&buf, std.math.maxInt(i32)));
 }
 
 test "rewritePromptRedraw: no OSC 133;A returns null" {
