@@ -1024,6 +1024,26 @@ pub const Daemon = struct {
         }
     }
 
+    /// Queue the session name and foreground process for a client's terminal.
+    fn queueSessionInfo(self: *Daemon, gpa: std.mem.Allocator, client: *Client, pty_fd: i32) void {
+        var name_buf: [256]u8 = undefined;
+        var pgrp: lib_posix.pid_t = 0;
+        const has_pgrp = cross.ioctl(pty_fd, cross.TIOCGPGRP, &pgrp) == 0 and pgrp > 0;
+        const foreground = if (has_pgrp) util.processName(&name_buf, pgrp) else null;
+
+        var info: std.Io.Writer.Allocating = .init(gpa);
+        defer info.deinit();
+        util.writeSessionInfo(&info.writer, self.session_name, foreground) catch |err| {
+            std.log.warn("failed to format session info err={s}", .{@errorName(err)});
+            return;
+        };
+        ipc.appendMessage(gpa, &client.write_buf, .Output, info.written()) catch |err| {
+            std.log.warn("failed to buffer session info err={s}", .{@errorName(err)});
+            return;
+        };
+        client.has_pending_output = true;
+    }
+
     pub fn handleInit(
         self: *Daemon,
         gpa: std.mem.Allocator,
@@ -1086,6 +1106,8 @@ pub const Daemon = struct {
                 client.has_pending_output = true;
             }
         }
+
+        self.queueSessionInfo(gpa, client, pty_fd);
 
         // only resize if leader, or on every attach with --min-window
         if (sets_size) {

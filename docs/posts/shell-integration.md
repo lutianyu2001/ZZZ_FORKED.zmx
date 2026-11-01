@@ -81,6 +81,15 @@ description = "zmx session name"
 style = "bold magenta"
 ```
 
+## terminal integration
+
+Each time a client attaches, `zmx` tells the outer terminal what it is now showing with two [user variables](https://wezterm.org/shell-integration.html#user-vars) (`OSC 1337;SetUserVar`, base64 encoded):
+
+- `zmx_session` is the session name
+- `zmx_foreground` is the short name of the process in the foreground, such as `bash` or `nvim`, if it can be determined
+
+A terminal can use these to label a tab or to recognize the program behind a restored screen. They are only sent when a client attaches, so `zmx_foreground` is not updated when the foreground process changes. Terminals that don't support user variables ignore them.
+
 ## environment variables
 
 A session's environment is initialized when the session is created. When re-attaching from a new terminal or a different SSH connection, environment variables describing the client connection (such as `SSH_AUTH_SOCK`, `DISPLAY`, or terminal remote control variables like `KITTY_LISTEN_ON`, `KITTY_PID`, `KITTY_WINDOW_ID`) become outdated in the running shell.

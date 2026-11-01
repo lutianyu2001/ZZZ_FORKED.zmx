@@ -68,3 +68,32 @@ count() { "$ZMX" history "$1" | grep -o "$2" | wc -l | tr -d ' '; }
   done
   [ "$after" -gt "$before" ]
 }
+
+# attach_output <session> [hold_seconds]: raw bytes a client receives on attach.
+attach_output() {
+  python3 - "$ZMX_DIR" "$1" "${2:-0.5}" 3>&- <<'PY'
+import os, select, socket, struct, sys, time
+sock_dir, name, hold = sys.argv[1], sys.argv[2], float(sys.argv[3])
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.connect(os.path.join(sock_dir, name))
+payload = struct.pack("<HHHH", 24, 80, 0, 0)                 # ipc.Resize
+s.sendall(struct.pack("<BBHI", 7, 1, 0, len(payload)) + payload)  # ipc.Header
+out, end = b"", time.time() + hold
+while time.time() < end:
+    if select.select([s], [], [], 0.05)[0]:
+        out += s.recv(65536)
+s.close()
+sys.stdout.write(out.decode("latin-1"))
+PY
+}
+
+@test "attach reports the session name and foreground process" {
+  # The marker is assembled at runtime so the echoed command line can't match it.
+  "$ZMX" run test-info -d bash -c 'printf "READY_%s\n" OK; exec sleep 30'
+  wait_for_output test-info "READY_OK"
+  sleep 0.2 # let the exec happen, the process name only changes then
+
+  output=$(attach_output test-info)
+  [[ "$output" == *$'\e]1337;SetUserVar=zmx_session='"$(printf test-info | base64)"$'\a'* ]]
+  [[ "$output" == *$'\e]1337;SetUserVar=zmx_foreground='"$(printf sleep | base64)"$'\a'* ]]
+}
