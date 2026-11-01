@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.17.0
+
+      - name: Check that the tag matches build.zig.zon
+        run: |
+          version=$(sed -nE 's/^ *\.version = "(.*)",$/\1/p' build.zig.zon)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "tag $GITHUB_REF_NAME doesn't match version $version" >&2
+            exit 1
+          fi
+
+      - name: Run unit tests
+        run: zig build test -Dtarget=x86_64-linux-musl
+
+      - name: Build release binaries
+        run: zig build release
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" zig-out/dist/* --title "$GITHUB_REF_NAME" --generate-notes
