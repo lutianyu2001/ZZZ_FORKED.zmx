@@ -21,6 +21,8 @@ the IPC can change between versions.
 ## Building and testing
 
 - Build with Zig 0.17.0 and `-Dtarget=x86_64-linux-musl`.
+- Zig on this machine comes from pixi global, whose manifest pins an exact version, so `pixi global update zig` keeps
+  it; move to a new one with `pixi global install "zig==<version>"` (seen with pixi 0.79.0).
 - The bats suite fails with `NameTooLong` when `TMPDIR` is a long path (socket path limit), so run it with a short
   `TMPDIR`.
 
