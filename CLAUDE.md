@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This is lutianyu2001/ZZZ_FORKED.zmx, Tianyu Lu's fork of neurosnap/zmx, the session manager.
+This is lutianyu2001/zmx, Tianyu Lu's fork of neurosnap/zmx, the session manager.
 
 ## Branches
 
